@@ -14,6 +14,10 @@ URL = "https://www.binance.com/bapi/futures/v1/friendly/future/copy-trade/lead-p
 TZ = timezone(timedelta(hours=8))
 
 
+class BinanceBusy(ValueError):
+    pass
+
+
 def post(url, payload):
     req = Request(url, json.dumps(payload).encode(), {"Content-Type": "application/json"})
     with urlopen(req, timeout=15) as response:
@@ -26,8 +30,12 @@ def orders(start, end, latest_only=False):
     while end >= start:
         result = post(URL, dict(portfolioId="5075281354358777856", startTime=start,
                                 endTime=end, pageSize=10))
-        if result.get("code") != "000000":
-            raise ValueError(f"币安返回 {result.get('code')}")
+        code = str(result.get("code"))
+        if code != "000000":
+            detail = f"币安 {code}：{result.get('message')}"
+            if code == "11012005":
+                raise BinanceBusy(detail)
+            raise ValueError(detail)
         rows = result["data"]["list"]
         for row in rows:
             key = hashlib.sha256(json.dumps(row, sort_keys=True).encode()).hexdigest()
@@ -57,7 +65,16 @@ def main():
     args = parser.parse_args()
     now = int(time.time() * 1000)
     if args.preview:
-        rows = orders(now - 6 * 86400000, now, latest_only=True)
+        for attempt in range(4):
+            try:
+                rows = orders(now - 6 * 86400000, now, latest_only=True)
+                break
+            except BinanceBusy as exc:
+                if attempt == 3:
+                    parser.exit(1, f"{exc}\n")
+                delay = 3 * 2**attempt
+                print(f"{exc}，{delay} 秒后重试", flush=True)
+                time.sleep(delay)
         print(message(rows[-1][1]) if rows else "近六天暂无记录")
         return
     token, chat = os.environ["TG_BOT_TOKEN"], os.environ["TG_CHAT_ID"]
@@ -90,6 +107,8 @@ def main():
                 print(f"HTTP {exc.code}", flush=True)
                 if exc.code == 429:
                     delay = max(60, delay, int(exc.headers.get("Retry-After", "0")))
+            elif isinstance(exc, ValueError):
+                print(f"{exc}，{delay} 秒后重试", flush=True)
             else:
                 print(type(exc).__name__, flush=True)
         time.sleep(delay)
