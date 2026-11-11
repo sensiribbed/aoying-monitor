@@ -1,0 +1,20 @@
+services:
+  monitor:
+    image: "${MONITOR_IMAGE:?Set MONITOR_IMAGE in .env}"
+    restart: unless-stopped
+    init: true
+    command: ["python", "-u", "-B", "/app/aoying_monitor.py"]
+    environment:
+      TG_BOT_TOKEN: "${TG_BOT_TOKEN:?Set TG_BOT_TOKEN in .env}"
+      TG_CHAT_ID: "${TG_CHAT_ID:?Set TG_CHAT_ID in .env}"
+      AOYING_DB_PATH: /data/aoying_monitor.sqlite3
+    volumes:
+      - monitor_data:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+volumes:
+  monitor_data:
